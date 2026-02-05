@@ -35,6 +35,20 @@ function extractToolResultId(msg: Extract<AgentMessage, { role: "toolResult" }>)
   return null;
 }
 
+// FIX: Check if a synthetic tool result already exists for a given tool call ID
+function hasSyntheticToolResult(messages: AgentMessage[], toolCallId: string): boolean {
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") continue;
+    if ((msg as { role?: unknown }).role !== "toolResult") continue;
+    const result = msg as Extract<AgentMessage, { role: "toolResult" }> & { isSynthetic?: boolean };
+    const id = extractToolResultId(result);
+    if (id === toolCallId && result.isSynthetic) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function makeMissingToolResult(params: {
   toolCallId: string;
   toolName?: string;
@@ -50,6 +64,7 @@ function makeMissingToolResult(params: {
       },
     ],
     isError: true,
+    isSynthetic: true, // FIX: Mark synthetic results to prevent double-insertion
     timestamp: Date.now(),
   } as Extract<AgentMessage, { role: "toolResult" }>;
 }
@@ -174,6 +189,10 @@ export function repairToolUseResultPairing(messages: AgentMessage[]): ToolUseRep
       const existing = spanResultsById.get(call.id);
       if (existing) {
         pushToolResult(existing);
+      } else if (hasSyntheticToolResult(messages, call.id)) {
+        // FIX: Skip if a synthetic already exists (from guard or previous repair)
+        // This prevents double-insertion when guard and repair race
+        continue;
       } else {
         const missing = makeMissingToolResult({
           toolCallId: call.id,

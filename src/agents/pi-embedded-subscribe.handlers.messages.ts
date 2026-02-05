@@ -81,7 +81,9 @@ export function handleMessageUpdate(
       } else if (ctx.state.deltaBuffer.startsWith(content)) {
         chunk = "";
       } else if (!ctx.state.deltaBuffer.includes(content)) {
-        chunk = content;
+        // FIX: Only append full content if deltaBuffer is empty/minimal.
+        // Prevents duplication when streaming content has minor mismatches with final.
+        chunk = ctx.state.deltaBuffer.length < 10 ? content : "";
       }
     }
   }

@@ -9,12 +9,12 @@ import type {
 // =============================================================================
 // CONTINUOUS MEMORY EXTRACTION
 // Runs a cheap LLM after every N turns to extract structured work context.
-// Direct API call — never enters the agent conversation (no recursion).
+// Direct API call - never enters the agent conversation (no recursion).
 // =============================================================================
 
 const MEMORY_API_URL = process.env.MEMORY_API_URL || "http://134.199.235.140:8000";
 const MEMORY_API_KEY = process.env.MEMORY_API_KEY || "3af7aebc2f1714f378580d68eb569a12";
-const EXTRACT_MODEL = process.env.MEMORY_EXTRACT_MODEL || "claude-3-5-haiku-20241022";
+const EXTRACT_MODEL = process.env.MEMORY_EXTRACT_MODEL || "gpt-4o-mini";
 const EXTRACT_EVERY_N_TURNS = parseInt(process.env.MEMORY_EXTRACT_INTERVAL || "3", 10);
 const EXTRACT_ENABLED = process.env.MEMORY_EXTRACT_ENABLED !== "false";
 
@@ -64,7 +64,7 @@ const EXTRACTION_PROMPT = `You are a memory extraction system. Given this conver
 Focus on:
 - What the human is asking for (active tasks)
 - What has been completed
-- What is still pending  
+- What is still pending
 - Key decisions and their reasoning
 - Important values (URLs, filenames, configs, credentials mentioned)
 - Any blockers or errors encountered
@@ -96,39 +96,67 @@ async function extractAndStore(): Promise<void> {
     const transcript = buildTranscript();
     const prompt = EXTRACTION_PROMPT.replace("{TRANSCRIPT}", transcript);
 
-    // Get API key from context or env
-    const apiKey = process.env.ANTHROPIC_API_KEY || "";
-    if (!apiKey) {
-      console.warn("[memory-extractor] No ANTHROPIC_API_KEY, skipping extraction");
+    // Get API key — try OpenAI first (works with direct calls), then Anthropic
+    const openaiKey = process.env.OPENAI_API_KEY || "";
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || "";
+
+    let text = "";
+
+    if (openaiKey) {
+      // OpenAI API call — NOT through the agent system
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: EXTRACT_MODEL,
+          max_tokens: 500,
+          messages: [{ role: "user", content: prompt }],
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!response.ok) {
+        console.warn(`[memory-extractor] OpenAI API error: ${response.status}`);
+        return;
+      }
+
+      const data = (await response.json()) as {
+        choices: Array<{ message: { content: string } }>;
+      };
+      text = data.choices?.[0]?.message?.content || "";
+    } else if (anthropicKey && !anthropicKey.startsWith("sk-ant-oat")) {
+      // Anthropic direct API (non-OAuth keys only)
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-3-5-haiku-20241022",
+          max_tokens: 500,
+          messages: [{ role: "user", content: prompt }],
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!response.ok) {
+        console.warn(`[memory-extractor] Anthropic API error: ${response.status}`);
+        return;
+      }
+
+      const data = (await response.json()) as {
+        content: Array<{ type: string; text: string }>;
+      };
+      text = data.content?.[0]?.text || "";
+    } else {
+      console.warn("[memory-extractor] No usable API key, skipping extraction");
       return;
     }
-
-    // Direct Anthropic API call — NOT through the agent system
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: EXTRACT_MODEL,
-        max_tokens: 500,
-        messages: [{ role: "user", content: prompt }],
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!response.ok) {
-      console.warn(`[memory-extractor] Anthropic API error: ${response.status}`);
-      return;
-    }
-
-    const data = (await response.json()) as {
-      content: Array<{ type: string; text: string }>;
-    };
-
-    const text = data.content?.[0]?.text || "";
 
     // Parse JSON from response (handle markdown code blocks)
     let jsonStr = text;
@@ -225,7 +253,7 @@ export default function memoryExtractorExtension(api: ExtensionAPI): void {
     // Extract every N turns (fire-and-forget, don't await)
     if (_turnCount - _lastExtractedTurn >= EXTRACT_EVERY_N_TURNS) {
       _lastExtractedTurn = _turnCount;
-      // Async fire-and-forget — never blocks the agent
+      // Async fire-and-forget - never blocks the agent
       extractAndStore().catch((err) => {
         console.warn(`[memory-extractor] Background error: ${err}`);
       });

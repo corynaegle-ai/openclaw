@@ -86,6 +86,10 @@ export function buildEmbeddedExtensionPaths(params: {
   if (pruning.additionalExtensionPaths) {
     paths.push(...pruning.additionalExtensionPaths);
   }
+  // Continuous memory extraction (LLM-powered, fire-and-forget)
+  if (process.env.MEMORY_EXTRACT_ENABLED !== "false") {
+    paths.push(resolvePiExtensionPath("memory-extractor"));
+  }
   return paths;
 }
 

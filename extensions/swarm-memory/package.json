@@ -1,0 +1,11 @@
+{
+  "name": "@moltbot/swarm-memory",
+  "version": "2026.1.29",
+  "description": "Swarm memory integration - auto-injects context from shared swarm memory",
+  "type": "module",
+  "moltbot": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

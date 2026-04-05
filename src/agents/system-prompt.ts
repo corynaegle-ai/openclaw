@@ -373,11 +373,11 @@ export function buildAgentSystemPrompt(params: {
 
   // For "none" mode, return just the basic identity line
   if (promptMode === "none") {
-    return "You are Claude Assistant running inside OpenClaw.";
+    return "You are Claude Assistant";
   }
 
   const lines = [
-    "You are Claude Assistant running inside OpenClaw.",
+    "You are Claude Assistant",
     "",
     "## Tooling",
     "Tool availability (filtered by policy):",
